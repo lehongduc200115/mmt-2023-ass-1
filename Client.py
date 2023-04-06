@@ -7,6 +7,7 @@ from RtpPacket import RtpPacket
 
 CACHE_FILE_NAME = "cache-"
 CACHE_FILE_EXT = ".jpg"
+FPS = 24
 
 class Client:
 	INIT = 0
@@ -18,6 +19,8 @@ class Client:
 	PLAY = 1
 	PAUSE = 2
 	TEARDOWN = 3
+	BACKWARD = 4
+	FORWARD = 5
 	
 	RTSP_VERSION = 1.0
 	TRANSPORT = 1.0
@@ -37,7 +40,9 @@ class Client:
 		self.teardownAcked = 0
 		self.connectToServer()
 		self.frameNbr = 0
-		
+		self.totalFrames = 0
+		self.lostFrames = 0
+
 	# THIS GUI IS JUST FOR REFERENCE ONLY, STUDENTS HAVE TO CREATE THEIR OWN GUI 	
 	def createWidgets(self):
 		"""Build GUI."""
@@ -68,7 +73,29 @@ class Client:
 		# Create a label to display the movie
 		self.label = Label(self.master, height=19)
 		self.label.grid(row=0, column=0, columnspan=4, sticky=W+E+N+S, padx=5, pady=5) 
+
+		# Create Info text
+		self.infoText = Label(self.master, width=20, padx=3, pady=3)
+		self.infoText["text"] = "loss rate: 0"
+		self.infoText.grid(row=2, column=0, padx=2, pady=2)
 	
+		# Create Info text
+		self.videoTimeText = Label(self.master, width=20, padx=3, pady=3)
+		self.videoTimeText["text"] = ""
+		self.videoTimeText.grid(row=2, column=1, padx=2, pady=2)
+
+				# Create Pause button			
+		self.forward = Button(self.master, width=20, padx=3, pady=3)
+		self.forward["text"] = "Forward"
+		self.forward["command"] = self.forwardMovie
+		self.forward.grid(row=2, column=2, padx=2, pady=2)
+
+				# Create Pause button			
+		self.backward = Button(self.master, width=20, padx=3, pady=3)
+		self.backward["text"] = "Backward"
+		self.backward["command"] = self.backwardMovie
+		self.backward.grid(row=2, column=3, padx=2, pady=2)
+
 	def setupMovie(self):
 		"""Setup button handler.
 		- send request SETUP if state is INIT
@@ -93,6 +120,38 @@ class Client:
 		- send request PAUSE if state is PLAYING
 		"""
 		if self.state == self.PLAYING: self.sendRtspRequest(self.PAUSE)
+
+	def forwardMovie(self, time = 2):
+		"""Pause button handler.
+		- send request PAUSE if state is PLAYING
+		"""
+		# framesToBeAdded = time * FPS
+		# if self.state == self.PLAYING:
+		# 	if (self.frameNbr + framesToBeAdded >= self.totalFrames):
+		# 		self.frameNbr = self.totalFrames
+		# 	else: self.frameNbr += framesToBeAdded
+
+		if self.state == self.PLAYING: 
+			self.sendRtspRequest(self.FORWARD)
+
+	def backwardMovie(self, time = 2):
+		"""Pause button handler.
+		- send request PAUSE if state is PLAYING
+		"""
+		# framesToBeAdded = time * FPS
+		# if self.state == self.PLAYING: 
+		# 	if (self.frameNbr - framesToBeAdded < 1):
+		# 		self.frameNbr = 1
+		# 	else: self.frameNbr -= framesToBeAdded
+
+		if self.state == self.PLAYING: 
+			self.sendRtspRequest(self.BACKWARD)
+
+			framesToBeAdded = time * FPS
+			if self.state == self.PLAYING: 
+				if (self.frameNbr - framesToBeAdded < 1):
+					self.frameNbr = 1
+				else: self.frameNbr -= framesToBeAdded
 
 	def playMovie(self):
 		"""Play button handler.
@@ -124,6 +183,9 @@ class Client:
 					print("Current SeqNum: " + str(cur_frame))
 					if cur_frame > self.frameNbr:
 						self.frameNbr = cur_frame
+						self.lostFrames += cur_frame - self.frameNbr
+						self.infoText["text"] = "frames lost: " + str(self.lostFrames)
+						self.videoTimeText["text"] = str(int(self.totalTime * cur_frame/self.totalFrames)) + ":" + str(int(self.totalTime))
 						self.updateMovie(self.writeFrame(rtp_packet.getPayload()))
 			except:
 				"""
@@ -204,10 +266,31 @@ class Client:
 			request += "\nSession: %d" % self.sessionId
 			# Keep track of the sent request
 			self.requestSent = self.TEARDOWN
+
+		elif requestCode == self.BACKWARD and self.state == self.PLAYING:
+			# Update RTSP sequence number
+			self.rtspSeq += 1
+			# Write RTSP request
+			request = "BACKWARD %s %s" % (self.fileName, self.RTSP_VERSION)
+			request += "\nCSqed: %d" % self.rtspSeq
+			request += "\nSession: %d" % self.sessionId
+			# Keep track of the sent request
+			self.requestSent = self.BACKWARD
+
+		elif requestCode == self.FORWARD and self.state == self.PLAYING:
+			# Update RTSP sequence number
+			self.rtspSeq += 1
+			# Write RTSP request
+			request = "FORWARD %s %s" % (self.fileName, self.RTSP_VERSION)
+			request += "\nCSqed: %d" % self.rtspSeq
+			request += "\nSession: %d" % self.sessionId
+			# Keep track of the sent request
+			self.requestSent = self.FORWARD
 		else:	return
 		# Send RTSP request
 		self.rtspSocket.send(request.encode())
-		print("\nData Sent:\n" + request)	
+		print("\nData Sent:\n" + request)
+
 		
 		
 	def recvRtspReply(self):
@@ -225,6 +308,7 @@ class Client:
 	def parseRtspReply(self, data):
 		"""Parse the RTSP reply from the server."""
 		lines = data.decode().split('\n')
+		print("client recieved: " + str(lines))
 		seqNum = int(lines[1].split(' ')[1])
 		# Process only if the server reply's seqnum is the same as the request's
 		if seqNum == self.rtspSeq:
@@ -237,6 +321,11 @@ class Client:
 				if int(lines[0].split(' ')[1]) == 200:
 					if self.requestSent == self.SETUP:
 						self.state = self.READY
+						lastLine = lines[len(lines) - 1]
+						self.totalFrames = int(lastLine.split(" ")[-1])
+						self.totalTime = self.totalFrames/FPS
+						# self.infoText["text"] = "total frames: " + str(self.totalFrames)
+						# print("totalFrames: " + str(self.totalFrames))
 						self.openRtpPort()
 					elif self.requestSent == self.PLAY:
 						self.state = self.PLAYING

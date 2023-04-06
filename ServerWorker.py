@@ -9,6 +9,8 @@ class ServerWorker:
 	PLAY = 'PLAY'
 	PAUSE = 'PAUSE'
 	TEARDOWN = 'TEARDOWN'
+	BACKWARD = 'BACKWARD'
+	FORWARD = 'FORWARD'
 	
 	INIT = 0
 	READY = 1
@@ -106,6 +108,24 @@ class ServerWorker:
 			
 			# Close the RTP socket
 			self.clientInfo['rtpSocket'].close()
+					
+		# Process BACKWARD request
+		elif requestType == self.BACKWARD:
+			print("processing BACKWARD\n")
+
+			# self.clientInfo['event'].set()
+			
+			self.replyRtsp(self.OK_200, seq[1])
+			self.clientInfo['videoStream'].backwardByFrame()
+
+		# Process FORWARD request
+		elif requestType == self.FORWARD:
+			print("processing FORWARD\n")
+
+			# self.clientInfo['event'].set()
+			
+			self.replyRtsp(self.OK_200, seq[1])
+			self.clientInfo['videoStream'].forwardByFrame()
 			
 	def sendRtp(self):
 		"""Send RTP packets over UDP."""
@@ -151,6 +171,8 @@ class ServerWorker:
 		if code == self.OK_200:
 			#print("200 OK")
 			reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
+			print("self.clientInfo: " + str(self.clientInfo))
+			reply += '\nTotal frames: ' + str(self.clientInfo['videoStream'].getTotalFrames())
 			connSocket = self.clientInfo['rtspSocket'][0]
 			connSocket.send(reply.encode())
 		
